@@ -1,7 +1,6 @@
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.Rendering.Universal;
 using UnityEngine.Tilemaps;
 
 /// <summary>
@@ -52,9 +51,30 @@ public static class TutorialMapBuilder
 
     private const string TILES_FOLDER = "Assets/Tiles/Tunnel/";
 
+    // The camera's picture. Drawn with the lens pointing up, because "up" is where the camera looks.
+    private const string CAMERA_SPRITE_PATH = "Assets/Sprites/Items/SecurityCamera.png";
+
+    // Above all the tilemaps (the Decor layer is 4), so the camera is drawn on top of the wall.
+    private const int CAMERA_SORTING_ORDER = 6;
+
+    // The vision cone is drawn on the floor but under the walls (the Walls layer is 2),
+    // so a wall always covers it. Same order as FloorShadow, and a bit closer to the camera so it draws above it.
+    private const int CONE_SORTING_ORDER = 1;
+    private const float CONE_Z = -0.1f;
+
+    // An unlit material: the cone keeps its own color in the dark tunnel, like a beam of light.
+    private const string CONE_MATERIAL_PATH = "Assets/Materials/VisionCone.mat";
+    private const string CONE_SHADER = "Universal Render Pipeline/2D/Sprite-Unlit-Default";
+
     [MenuItem("Tools/Build Tutorial Map")]
     private static void Build()
     {
+        if (EditorApplication.isPlaying)
+        {
+            Debug.LogError("Stop the game first (the Play button). Changes made while playing are lost when it stops.");
+            return;
+        }
+
         GameObject grid = GameObject.Find("TunnelGrid");
         if (grid == null)
         {
@@ -158,8 +178,10 @@ public static class TutorialMapBuilder
         GameObject player = MovePlayer(floor, playerCell);
         PlaceMarker("BottleSpawn", floor.GetCellCenterWorld(bottleCell));
         PlaceSecurityCamera(floor, cameraCell, CameraFacing(CameraColumn(), CameraRow()), player, playerStart);
+        // Saves right away, so the result is never lost by forgetting Cmd+S.
         EditorSceneManager.MarkSceneDirty(grid.scene);
-        Debug.Log("Tutorial map built.");
+        EditorSceneManager.SaveScene(grid.scene);
+        Debug.Log("Tutorial map built and saved.");
     }
 
     private static Tilemap FindLayer(GameObject grid, string name)
@@ -348,10 +370,23 @@ public static class TutorialMapBuilder
 
         GameObject cameraObject = new GameObject("SecurityCamera");
         Undo.RegisterCreatedObjectUndo(cameraObject, "Build Tutorial Map");
-        Light2D visionLight = cameraObject.AddComponent<Light2D>();
-        visionLight.lightType = Light2D.LightType.Point;
-        visionLight.intensity = 1.2f;
         SecurityCamera securityCamera = cameraObject.AddComponent<SecurityCamera>();
+
+        // The cone is a child, so it turns with the camera. SecurityCamera rebuilds its mesh every frame.
+        var cone = new GameObject("VisionCone");
+        cone.transform.SetParent(cameraObject.transform, false);
+        cone.transform.localPosition = new Vector3(0f, 0f, CONE_Z);
+        MeshFilter coneFilter = cone.AddComponent<MeshFilter>();
+        MeshRenderer coneRenderer = cone.AddComponent<MeshRenderer>();
+        coneRenderer.sharedMaterial = ConeMaterial();
+        coneRenderer.sortingOrder = CONE_SORTING_ORDER;
+
+        // The picture is a child too, so it turns together with the camera and its cone.
+        var body = new GameObject("Body");
+        body.transform.SetParent(cameraObject.transform, false);
+        SpriteRenderer bodyRenderer = body.AddComponent<SpriteRenderer>();
+        bodyRenderer.sprite = CameraSprite();
+        bodyRenderer.sortingOrder = CAMERA_SORTING_ORDER;
 
         Vector3 center = floor.GetCellCenterWorld(cell);
         cameraObject.transform.position = center + new Vector3(facing.x, facing.y, 0f) * 0.6f;
@@ -367,9 +402,55 @@ public static class TutorialMapBuilder
         // Fills the camera's fields, like dragging them in the Inspector.
         SerializedObject fields = new SerializedObject(securityCamera);
         fields.FindProperty("centerAngle").floatValue = angle;
+        fields.FindProperty("visionCone").objectReferenceValue = coneFilter;
         fields.FindProperty("player").objectReferenceValue = player != null ? player.transform : null;
         fields.FindProperty("respawnPoint").objectReferenceValue = respawnPoint;
         fields.ApplyModifiedProperties();
+    }
+
+    /// <summary>
+    /// The material is saved as an asset, so it goes into the build. A material made only in code at runtime
+    /// could lose its shader in the build, because Unity leaves out shaders that nothing references.
+    /// </summary>
+    private static Material ConeMaterial()
+    {
+        Material material = AssetDatabase.LoadAssetAtPath<Material>(CONE_MATERIAL_PATH);
+        if (material == null)
+        {
+            material = new Material(Shader.Find(CONE_SHADER));
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(CONE_MATERIAL_PATH));
+            AssetDatabase.CreateAsset(material, CONE_MATERIAL_PATH);
+        }
+        return material;
+    }
+
+    /// <summary>A gray box with a dark lens on top. Only a stand-in until the AI-made sprite is ready.</summary>
+    private static Sprite CameraSprite()
+    {
+        Color casing = new Color(0.6f, 0.6f, 0.62f, 1f);
+        Color lens = new Color(0.1f, 0.1f, 0.12f, 1f);
+        Color glint = new Color(0.4f, 0.7f, 1f, 1f);
+        Color mount = new Color(0.3f, 0.3f, 0.32f, 1f);
+        return PlaceholderSprites.LoadOrCreate(CAMERA_SPRITE_PATH, (x, y) =>
+        {
+            if (PlaceholderSprites.InRect(x, y, 15, 24, 16, 25))
+            {
+                return glint;
+            }
+            if (PlaceholderSprites.InRect(x, y, 12, 21, 19, 27))
+            {
+                return lens;
+            }
+            if (PlaceholderSprites.InRect(x, y, 10, 8, 21, 20))
+            {
+                return casing;
+            }
+            if (PlaceholderSprites.InRect(x, y, 14, 3, 17, 7))
+            {
+                return mount;
+            }
+            return Color.clear;
+        });
     }
 
     private static GameObject MovePlayer(Tilemap floor, Vector3Int cell)

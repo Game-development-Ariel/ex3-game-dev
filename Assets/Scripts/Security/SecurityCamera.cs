@@ -1,13 +1,12 @@
 using UnityEngine;
-using UnityEngine.Rendering.Universal;
 
 /// <summary>
 /// A security camera on the ceiling that sweeps from side to side.
-/// Its yellow light on the floor shows where it is looking.
-/// If the player stands in that light and no wall is in the way, the player is caught
-/// and sent back to the start point (in the tutorial nobody dies).
+/// A yellow cone on the floor shows exactly what it sees: the cone is built from rays that stop at the first wall,
+/// and the same rays decide whether the player is seen. So if the cone touches the player, the player is caught,
+/// and behind a wall there is no cone and no danger.
+/// When caught, the player is sent back to the start point and the GameManager counts the capture.
 /// </summary>
-[RequireComponent(typeof(Light2D))]
 public class SecurityCamera : MonoBehaviour
 {
     [Header("Sweep")]
@@ -30,10 +29,16 @@ public class SecurityCamera : MonoBehaviour
     [Tooltip("How far the camera sees, in world units (tiles)")]
     [SerializeField] private float viewDistance = 14f;
 
-    [SerializeField] private Color normalColor = new Color(1f, 0.85f, 0.3f);
-    [SerializeField] private Color alarmColor = new Color(1f, 0.2f, 0.15f);
+    [Tooltip("How many rays build the cone. More rays = the cone follows the walls more exactly")]
+    [SerializeField] private int coneRays = 40;
 
-    [Tooltip("Seconds the light stays red after catching the player. The camera doesn't look during this time")]
+    [Tooltip("The object that draws the cone. Its mesh is rebuilt every frame")]
+    [SerializeField] private MeshFilter visionCone;
+
+    [SerializeField] private Color normalColor = new Color(1f, 0.85f, 0.3f, 0.35f);
+    [SerializeField] private Color alarmColor = new Color(1f, 0.2f, 0.15f, 0.5f);
+
+    [Tooltip("Seconds the cone stays red after catching the player. The camera doesn't look during this time")]
     [SerializeField] private float alarmSeconds = 1f;
 
     [Header("Player")]
@@ -42,23 +47,20 @@ public class SecurityCamera : MonoBehaviour
     [Tooltip("Where the player is sent when caught")]
     [SerializeField] private Transform respawnPoint;
 
-    private Light2D visionLight;
-
     // Seconds since the sweep started. The angle is calculated from it.
     private float sweepTime;
 
-    // More than 0 while the light is red after a catch.
+    // More than 0 while the cone is red after a catch.
     private float alarmTimer;
 
-    /// <summary>Keeps the light the same shape as the vision, also while editing values in the Inspector.</summary>
-    private void OnValidate()
-    {
-        ApplyLightShape();
-    }
+    private Mesh coneMesh;
+    private Vector3[] coneVertices;
+    private Color[] coneColors;
+    private int[] coneTriangles;
 
     private void Awake()
     {
-        ApplyLightShape();
+        CreateConeMesh();
     }
 
     private void Update()
@@ -66,20 +68,18 @@ public class SecurityCamera : MonoBehaviour
         sweepTime += Time.deltaTime;
         transform.rotation = Quaternion.Euler(0f, 0f, CurrentAngle());
 
-        if (alarmTimer > 0f)
+        bool alarm = alarmTimer > 0f;
+        if (alarm)
         {
             alarmTimer -= Time.deltaTime;
-            if (alarmTimer <= 0f)
-            {
-                visionLight.color = normalColor;
-            }
-            return;
         }
-
-        if (CanSeePlayer())
+        else if (CanSeePlayer())
         {
             CatchPlayer();
+            alarm = true;
         }
+
+        UpdateCone(alarm ? alarmColor : normalColor);
     }
 
     /// <summary>
@@ -123,35 +123,40 @@ public class SecurityCamera : MonoBehaviour
 
         Vector2 eye = transform.position;
         Vector2 toPlayer = (Vector2)player.position - eye;
+        float distance = toPlayer.magnitude;
 
-        if (toPlayer.magnitude > viewDistance)
+        // The camera looks along its "up" direction, like the cone.
+        if (distance > viewDistance || Vector2.Angle(transform.up, toPlayer) > viewAngle / 2f)
         {
             return false;
         }
 
-        // The camera looks along its "up" direction, like the light cone.
-        if (Vector2.Angle(transform.up, toPlayer) > viewAngle / 2f)
-        {
-            return false;
-        }
+        // Seen only if no wall is closer than the player along the line between them.
+        return DistanceToWall(eye, toPlayer / distance, distance) >= distance;
+    }
 
-        // The hits come sorted from the closest. If a wall comes before the player, the wall hides the player.
-        RaycastHit2D[] hits = Physics2D.LinecastAll(eye, player.position);
+    /// <summary>
+    /// How far a ray from the camera goes before it hits a wall, up to maxDistance.
+    /// Both the cone and the player check use this, so what the cone shows is exactly what the camera sees.
+    /// </summary>
+    private float DistanceToWall(Vector2 origin, Vector2 direction, float maxDistance)
+    {
+        // The hits come sorted from the closest. Triggers (like the bottle) and the player don't block the view.
+        RaycastHit2D[] hits = Physics2D.RaycastAll(origin, direction, maxDistance);
         foreach (RaycastHit2D hit in hits)
         {
-            if (hit.collider.isTrigger)
+            bool isPlayer = player != null && (hit.transform == player || hit.transform.IsChildOf(player));
+            if (!hit.collider.isTrigger && !isPlayer)
             {
-                continue;
+                return hit.distance;
             }
-            return hit.transform == player || hit.transform.IsChildOf(player);
         }
-        return true;
+        return maxDistance;
     }
 
     private void CatchPlayer()
     {
         alarmTimer = alarmSeconds;
-        visionLight.color = alarmColor;
         Debug.Log("The camera caught the player.");
 
         if (respawnPoint != null)
@@ -173,25 +178,62 @@ public class SecurityCamera : MonoBehaviour
         }
     }
 
-    private void ApplyLightShape()
+    /// <summary>
+    /// The cone is a fan of triangles: vertex 0 is the camera, and the others are the ends of the rays.
+    /// The triangles never change, only where the ray ends are, so they are built once here.
+    /// </summary>
+    private void CreateConeMesh()
     {
-        if (visionLight == null)
-        {
-            visionLight = GetComponent<Light2D>();
-        }
-        if (visionLight == null)
+        if (visionCone == null)
         {
             return;
         }
 
-        // Inner values close to the outer ones give the light sharp edges,
-        // so the lit area on the floor is exactly the area where the camera sees the player.
-        visionLight.pointLightOuterAngle = viewAngle;
-        visionLight.pointLightInnerAngle = viewAngle * 0.9f;
-        visionLight.pointLightOuterRadius = viewDistance;
-        visionLight.pointLightInnerRadius = viewDistance * 0.85f;
-        visionLight.falloffIntensity = 0.2f;
-        visionLight.color = normalColor;
+        coneMesh = new Mesh { name = "Vision Cone" };
+        coneMesh.MarkDynamic(); // Tells Unity the mesh changes every frame.
+        visionCone.mesh = coneMesh;
+
+        int rayCount = Mathf.Max(2, coneRays);
+        coneVertices = new Vector3[rayCount + 1];
+        coneColors = new Color[rayCount + 1];
+        coneTriangles = new int[(rayCount - 1) * 3];
+        for (int i = 0; i < rayCount - 1; i++)
+        {
+            coneTriangles[i * 3] = 0;
+            coneTriangles[i * 3 + 1] = i + 1;
+            coneTriangles[i * 3 + 2] = i + 2;
+        }
+    }
+
+    private void UpdateCone(Color color)
+    {
+        if (coneMesh == null)
+        {
+            return;
+        }
+
+        Vector2 eye = transform.position;
+        int rayCount = coneVertices.Length - 1;
+        coneVertices[0] = Vector3.zero;
+
+        for (int i = 0; i < rayCount; i++)
+        {
+            // From the left edge of the view to the right edge, in the camera's own (local) directions.
+            float angle = Mathf.Lerp(viewAngle / 2f, -viewAngle / 2f, i / (rayCount - 1f));
+            Vector3 localDirection = Quaternion.Euler(0f, 0f, angle) * Vector3.up;
+            Vector2 worldDirection = transform.TransformDirection(localDirection);
+            coneVertices[i + 1] = localDirection * DistanceToWall(eye, worldDirection, viewDistance);
+        }
+
+        for (int i = 0; i < coneColors.Length; i++)
+        {
+            coneColors[i] = color;
+        }
+
+        coneMesh.vertices = coneVertices;
+        coneMesh.colors = coneColors;
+        coneMesh.triangles = coneTriangles;
+        coneMesh.RecalculateBounds();
     }
 
     /// <summary>Draws the edges of the vision in the Scene view when the camera is selected.</summary>

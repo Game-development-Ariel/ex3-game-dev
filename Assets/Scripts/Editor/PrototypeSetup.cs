@@ -20,8 +20,6 @@ public static class PrototypeSetup
     private const string BottleSpritePath = "Assets/Sprites/Items/WaterBottle.png";
     private const string BottlePrefabPath = "Assets/Prefabs/WaterBottle.prefab";
 
-    private const int PixelsPerTile = 32;
-
     // Drawn above the floor and decor tilemaps.
     private const int BottleSortingOrder = 5;
 
@@ -38,6 +36,12 @@ public static class PrototypeSetup
     [MenuItem("Tools/Setup Prototype")]
     private static void Setup()
     {
+        if (EditorApplication.isPlaying)
+        {
+            Debug.LogError("Stop the game first (the Play button). Changes made while playing are lost when it stops.");
+            return;
+        }
+
         Scene level = SceneManager.GetActiveScene();
         if (level.path != LevelScenePath)
         {
@@ -50,8 +54,10 @@ public static class PrototypeSetup
         SetBuildScenes();
         SetupLevel(bottlePrefab);
 
+        // Saves right away, so the result is never lost by forgetting Cmd+S.
         EditorSceneManager.MarkSceneDirty(level);
-        Debug.Log("Prototype setup done. Save the scene (Cmd+S).");
+        EditorSceneManager.SaveScene(level);
+        Debug.Log("Prototype setup done and saved.");
     }
 
     // ---------- Bottle ----------
@@ -81,41 +87,22 @@ public static class PrototypeSetup
         return prefab;
     }
 
-    /// <summary>A simple blue bottle drawn pixel by pixel. Only a stand-in until the AI-made sprite is ready.</summary>
+    /// <summary>A simple blue bottle. Only a stand-in until the AI-made sprite is ready.</summary>
     private static Sprite CreatePlaceholderSprite()
     {
-        if (!File.Exists(BottleSpritePath))
+        Color water = new Color(0.25f, 0.6f, 1f, 1f);
+        return PlaceholderSprites.LoadOrCreate(BottleSpritePath, (x, y) =>
         {
-            var texture = new Texture2D(PixelsPerTile, PixelsPerTile, TextureFormat.RGBA32, false);
-            Color clear = new Color(0f, 0f, 0f, 0f);
-            Color water = new Color(0.25f, 0.6f, 1f, 1f);
-            Color cap = Color.white;
-            for (int x = 0; x < PixelsPerTile; x++)
+            if (PlaceholderSprites.InRect(x, y, 13, 26, 18, 28))
             {
-                for (int y = 0; y < PixelsPerTile; y++)
-                {
-                    bool body = x >= 11 && x <= 20 && y >= 4 && y <= 22;
-                    bool neck = x >= 13 && x <= 18 && y >= 23 && y <= 25;
-                    bool top = x >= 13 && x <= 18 && y >= 26 && y <= 28;
-                    texture.SetPixel(x, y, top ? cap : (body || neck ? water : clear));
-                }
+                return Color.white; // cap
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(BottleSpritePath));
-            File.WriteAllBytes(BottleSpritePath, texture.EncodeToPNG());
-            Object.DestroyImmediate(texture);
-            AssetDatabase.ImportAsset(BottleSpritePath);
-        }
-
-        // Same import settings as the tunnel sprites: pixel art, one tile = 32 pixels.
-        var importer = (TextureImporter)AssetImporter.GetAtPath(BottleSpritePath);
-        importer.textureType = TextureImporterType.Sprite;
-        importer.spriteImportMode = SpriteImportMode.Single;
-        importer.spritePixelsPerUnit = PixelsPerTile;
-        importer.filterMode = FilterMode.Point;
-        importer.textureCompression = TextureImporterCompression.Uncompressed;
-        importer.alphaIsTransparency = true;
-        importer.SaveAndReimport();
-        return AssetDatabase.LoadAssetAtPath<Sprite>(BottleSpritePath);
+            if (PlaceholderSprites.InRect(x, y, 11, 4, 20, 22) || PlaceholderSprites.InRect(x, y, 13, 23, 18, 25))
+            {
+                return water; // body and neck
+            }
+            return Color.clear;
+        });
     }
 
     // ---------- End screen ----------
@@ -154,6 +141,9 @@ public static class PrototypeSetup
             new EditorBuildSettingsScene(LevelScenePath, true),
             new EditorBuildSettingsScene(EndScenePath, true),
         };
+
+        // Writes the project settings (with the scene list) to disk now, and not only when Unity quits.
+        AssetDatabase.SaveAssets();
     }
 
     // ---------- Level ----------
