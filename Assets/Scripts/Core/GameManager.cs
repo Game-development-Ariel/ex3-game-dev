@@ -1,8 +1,9 @@
+using System;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Keeps the player's values for the whole game: health, water, captures and whether the player carries the bottle.
+/// The HUD shows the health as "hope", like in the design: being caught takes hope, memories give it back.
 /// There is only one GameManager (a singleton), and it survives scene changes (DontDestroyOnLoad),
 /// so the end screen can show the values from the level.
 /// </summary>
@@ -14,6 +15,9 @@ public class GameManager : MonoBehaviour
     [Header("Rules")]
     [SerializeField] private int maxHealth = 100;
 
+    [Tooltip("Health at the start. In the tutorial the hero wakes up weak, so memories have room to fill it")]
+    [SerializeField] private int startHealth = 100;
+
     [Tooltip("Health lost every time a camera catches the player")]
     [SerializeField] private int damagePerCapture = 25;
 
@@ -21,6 +25,9 @@ public class GameManager : MonoBehaviour
 
     [Tooltip("Water gained by bringing the bottle back to the mattress")]
     [SerializeField] private int waterPerBottle = 25;
+
+    [Tooltip("Health never drops below this. Above 0 means the player can't lose (used in the tutorial)")]
+    [SerializeField] private int minHealth = 0;
 
     [Header("Scenes")]
     [SerializeField] private string levelScene = "Tutorial";
@@ -37,6 +44,12 @@ public class GameManager : MonoBehaviour
 
     /// <summary>How many seconds the last level took.</summary>
     public float LevelSeconds { get; private set; }
+
+    /// <summary>Happens when a camera catches the player. The HUD listens to it to flash and shake.</summary>
+    public event Action Captured;
+
+    /// <summary>Happens when the player picks up the bottle.</summary>
+    public event Action BottlePicked;
 
     private void Awake()
     {
@@ -56,6 +69,13 @@ public class GameManager : MonoBehaviour
     public void PickUpBottle()
     {
         HasBottle = true;
+        BottlePicked?.Invoke(); // ?. calls it only if someone listens.
+    }
+
+    /// <summary>Called by a memory the player found. Gives back hope, up to the maximum.</summary>
+    public void AddHope(int amount)
+    {
+        Health = Mathf.Min(maxHealth, Health + amount);
     }
 
     /// <summary>Called by a camera that caught the player. The player drops the bottle and loses health.</summary>
@@ -63,7 +83,8 @@ public class GameManager : MonoBehaviour
     {
         Captures++;
         HasBottle = false;
-        Health = Mathf.Max(0, Health - damagePerCapture);
+        Health = Mathf.Max(minHealth, Health - damagePerCapture);
+        Captured?.Invoke();
         if (Health == 0)
         {
             EndLevel(false);
@@ -86,19 +107,19 @@ public class GameManager : MonoBehaviour
     public void PlayAgain()
     {
         ResetValues();
-        SceneManager.LoadScene(levelScene);
+        ScreenFader.FadeAndLoad(levelScene);
     }
 
     private void EndLevel(bool won)
     {
         Won = won;
         LevelSeconds = Time.timeSinceLevelLoad;
-        SceneManager.LoadScene(endScene);
+        ScreenFader.FadeAndLoad(endScene);
     }
 
     private void ResetValues()
     {
-        Health = maxHealth;
+        Health = Mathf.Min(startHealth, maxHealth);
         Water = startWater;
         Captures = 0;
         HasBottle = false;

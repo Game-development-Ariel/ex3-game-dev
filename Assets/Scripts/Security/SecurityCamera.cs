@@ -6,6 +6,7 @@ using UnityEngine;
 /// and the same rays decide whether the player is seen. So if the cone touches the player, the player is caught,
 /// and behind a wall there is no cone and no danger.
 /// When caught, the player is sent back to the start point and the GameManager counts the capture.
+/// A small red light on the camera blinks while it watches, and the camera hums: the closer you are, the louder.
 /// </summary>
 public class SecurityCamera : MonoBehaviour
 {
@@ -17,17 +18,17 @@ public class SecurityCamera : MonoBehaviour
     [SerializeField] private float sweepAngle = 60f;
 
     [Tooltip("Seconds it takes to turn from one side to the other")]
-    [SerializeField] private float turnSeconds = 3f;
+    [SerializeField] private float turnSeconds = 5f;
 
     [Tooltip("Seconds the camera stays still at each side before turning back")]
-    [SerializeField] private float pauseSeconds = 2f;
+    [SerializeField] private float pauseSeconds = 2.5f;
 
     [Header("Vision")]
     [Tooltip("How wide the camera sees, in degrees")]
     [SerializeField] private float viewAngle = 40f;
 
     [Tooltip("How far the camera sees, in world units (tiles)")]
-    [SerializeField] private float viewDistance = 14f;
+    [SerializeField] private float viewDistance = 9f;
 
     [Tooltip("How many rays build the cone. More rays = the cone follows the walls more exactly")]
     [SerializeField] private int coneRays = 40;
@@ -35,11 +36,18 @@ public class SecurityCamera : MonoBehaviour
     [Tooltip("The object that draws the cone. Its mesh is rebuilt every frame")]
     [SerializeField] private MeshFilter visionCone;
 
-    [SerializeField] private Color normalColor = new Color(1f, 0.85f, 0.3f, 0.35f);
-    [SerializeField] private Color alarmColor = new Color(1f, 0.2f, 0.15f, 0.5f);
+    [Tooltip("A cold, pale light: the camera is a machine, not a lamp")]
+    [SerializeField] private Color normalColor = new Color(0.66f, 0.76f, 0.95f, 0.13f);
+    [SerializeField] private Color alarmColor = new Color(0.8f, 0.1f, 0.08f, 0.32f);
 
     [Tooltip("Seconds the cone stays red after catching the player. The camera doesn't look during this time")]
     [SerializeField] private float alarmSeconds = 1f;
+
+    [Tooltip("How see-through the far end of the cone is, compared to the camera's end. Looks like light fading")]
+    [SerializeField] private float coneEndAlpha = 0.1f;
+
+    [Tooltip("Blinks per second of the red light on the camera")]
+    [SerializeField] private float blinkRate = 1.2f;
 
     [Header("Player")]
     [SerializeField] private Transform player;
@@ -53,6 +61,8 @@ public class SecurityCamera : MonoBehaviour
     // More than 0 while the cone is red after a catch.
     private float alarmTimer;
 
+    private SpriteRenderer led;
+
     private Mesh coneMesh;
     private Vector3[] coneVertices;
     private Color[] coneColors;
@@ -61,6 +71,7 @@ public class SecurityCamera : MonoBehaviour
     private void Awake()
     {
         CreateConeMesh();
+        CreateIndicators();
     }
 
     private void Update()
@@ -80,6 +91,47 @@ public class SecurityCamera : MonoBehaviour
         }
 
         UpdateCone(alarm ? alarmColor : normalColor);
+        UpdateIndicators(alarm);
+    }
+
+    /// <summary>
+    /// The red light (a small glow on the lens) and the hum. Both are made here in code,
+    /// so the map builder doesn't need to know about them.
+    /// </summary>
+    private void CreateIndicators()
+    {
+        led = CreateSprite("Led", UiTheme.Sprite("Glow"), new Color(1f, 0.15f, 0.1f), 0.35f, 7);
+        led.transform.localPosition = new Vector3(0f, 0.32f, 0f);
+
+        // A 3D sound: it gets quieter with distance. The listener (on the main camera) is 10 units
+        // in front of the map, so the distances start at 10.
+        AudioSource hum = gameObject.AddComponent<AudioSource>();
+        hum.clip = Resources.Load<AudioClip>("Audio/CameraHum");
+        hum.loop = true;
+        hum.spatialBlend = 1f;
+        hum.rolloffMode = AudioRolloffMode.Linear;
+        hum.minDistance = 10f;
+        hum.maxDistance = 20f;
+        hum.volume = 0.35f;
+        hum.Play();
+    }
+
+    private SpriteRenderer CreateSprite(string name, Sprite sprite, Color color, float scale, int sortingOrder)
+    {
+        var child = new GameObject(name);
+        child.transform.SetParent(transform, false);
+        child.transform.localScale = Vector3.one * scale;
+        SpriteRenderer spriteRenderer = child.AddComponent<SpriteRenderer>();
+        spriteRenderer.sprite = sprite;
+        spriteRenderer.color = color;
+        spriteRenderer.sortingOrder = sortingOrder;
+        return spriteRenderer;
+    }
+
+    private void UpdateIndicators(bool alarm)
+    {
+        // During the alarm the light stays on. Repeat(t, 1) counts from 0 to 1 again and again.
+        led.enabled = alarm || Mathf.Repeat(Time.time * blinkRate, 1f) < 0.3f;
     }
 
     /// <summary>
@@ -157,7 +209,6 @@ public class SecurityCamera : MonoBehaviour
     private void CatchPlayer()
     {
         alarmTimer = alarmSeconds;
-        Debug.Log("The camera caught the player.");
 
         if (respawnPoint != null)
         {
@@ -225,9 +276,13 @@ public class SecurityCamera : MonoBehaviour
             coneVertices[i + 1] = localDirection * DistanceToWall(eye, worldDirection, viewDistance);
         }
 
-        for (int i = 0; i < coneColors.Length; i++)
+        // The camera's end of the cone is strong and the far end is faint.
+        // The mesh blends the colors between the corners, so the light seems to fade with distance.
+        Color faint = new Color(color.r, color.g, color.b, color.a * coneEndAlpha);
+        coneColors[0] = color;
+        for (int i = 1; i < coneColors.Length; i++)
         {
-            coneColors[i] = color;
+            coneColors[i] = faint;
         }
 
         coneMesh.vertices = coneVertices;
