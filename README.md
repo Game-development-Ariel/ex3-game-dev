@@ -9,8 +9,15 @@
 ## קישורים
 
 * המשחק באתר המשחקים: יתווסף בהמשך
-* תכנון ארבעת השלבים: [story-and-levels.md](https://github.com/Game-development-Ariel/Light-in-the-Tunnel/blob/main/story-and-levels.md)
 * סרטון מהטלפון: יתווסף בהמשך
+
+## תכנון השלבים (חלק א)
+
+לכל אחד מהמשחקים שלנו תכננו ארבעה שלבים: הדרכה, קל, בינוני וקשה.
+
+* אור במנהרה: [story-and-levels.md](https://github.com/Game-development-Ariel/Light-in-the-Tunnel/blob/main/story-and-levels.md)
+* ביטקוין קבור: [levels.md](https://github.com/Game-development-Ariel/Buried-Bitcoin/blob/main/levels.md)
+* בר הבלנדים: [levels.md](https://github.com/Game-development-Ariel/Vino-Blend-Bar/blob/main/levels.md)
 
 ## חברי הצוות
 
