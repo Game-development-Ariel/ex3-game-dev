@@ -8,10 +8,23 @@
 
 ## קישורים
 
-* המשחק באתר המשחקים: יתווסף בהמשך
+* המשחק באתר המשחקים: [game-dev-ariel.itch.io/light-in-the-tunnel](https://game-dev-ariel.itch.io/light-in-the-tunnel)
 * סרטונים מהטלפון (אנדרואיד):
   * [לאורך](Videos/phone-portrait.mp4)
   * [לרוחב](Videos/phone-landscape.mp4)
+
+## מה מימשנו (חלק ב)
+
+| דרישה | איך היא ממומשת | קבצים |
+|---|---|---|
+| דגמים ויצירה אוטומטית, כולל דגמים מבינה מלאכותית | בקבוק המים נוצר מדגם בכל פעם שאין בקבוק בשלב. התמונות של הבקבוק והמצלמה נוצרו בבינה מלאכותית | `Items/BottleSpawner.cs`, `Items/WaterBottle.cs` |
+| התנגשויות | הקירות עוצרים את השחקן. איסוף הבקבוק, המסירה במזרן, הזיכרונות והרמזים עובדים דרך התנגשויות | `Player/PlayerController.cs`, `Items/MattressGoal.cs`, `Level/MemoryZone.cs`, `Level/HintZone.cs` |
+| ניהול שלבים ושמירת ערכים | מנהל משחק יחיד (סינגלטון עם `DontDestroyOnLoad`) שומר את התקווה, את מספר הפעמים שראו אותך ואת הזמן. מסך הסיום מציג אותם | `Core/GameManager.cs`, `UI/EndScreen.cs` |
+| התאמה לטלפון | ג'ויסטיק על המסך במכשיר עם מסך מגע. הממשק והמצלמה מתאימים את עצמם לגודל המסך ולמצב לאורך או לרוחב | `UI/MobileJoystick.cs`, `Camera/OrientationCameraSize.cs` |
+
+המצלמה רואה דרך קרניים שנעצרות בקירות (`Security/SecurityCamera.cs`), והמפה נבנית מתרשים טקסט (`Editor/TutorialMapBuilder.cs`). כל הקבצים נמצאים תחת `Assets/Scripts`.
+
+**משחקים:** במחשב, `WASD` או החצים. בטלפון, הג'ויסטיק בפינה.
 
 ## תכנון השלבים (חלק א)
 
